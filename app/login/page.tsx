@@ -1,27 +1,28 @@
 "use client";
 
-import OtpInput from "@/components/OtpInput";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import OtpInput from "@/components/OtpInput";
 
-const Signup = () => {
+export default function Login() {
   const router = useRouter();
-  const [name, setName] = useState("");
+  const { login } = useAuth();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
   const [otp, setOtp] = useState("");
-  const [step, setStep] = useState<"signup" | "otp">("signup");
 
+  const [showOtp, setShowOtp] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmitData = async () => {
+  const handleLogin = async () => {
     setError("");
     setMessage("");
 
-    if (!name || !email || !password) {
+    if (!email || !password) {
       setError("Please fill all fields.");
       return;
     }
@@ -29,20 +30,33 @@ const Signup = () => {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/signup", {
+      const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          deviceType: "WEB",
+        }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        setError(data.error || "Something went wrong");
-      } else {
-        setMessage("OTP sent to your email.");
-        setStep("otp");
+      // 🔥 If email not verified
+      if (res.status === 403) {
+        setShowOtp(true);
+        setMessage("Verification code sent to your email.");
+        return;
       }
+
+      if (!res.ok) {
+        setError(data.error || "Invalid credentials");
+        return;
+      }
+
+      // Normal login
+      login(data.accessToken, data.refreshToken);
+      router.push("/dashboard");
     } catch {
       setError("Network error. Try again.");
     } finally {
@@ -51,24 +65,22 @@ const Signup = () => {
   };
 
   const handleOtpVerify = async () => {
-    setError("");
-    setMessage("");
-
     if (otp.length !== 5) {
-      setError("Please enter complete OTP.");
+      setError("Enter complete OTP.");
       return;
     }
 
     setLoading(true);
+    setError("");
 
     try {
       const res = await fetch("/api/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          token: otp,
           email,
-          deviceType:"WEB"
+          token: otp,
+          deviceType: "WEB",
         }),
       });
 
@@ -76,13 +88,13 @@ const Signup = () => {
 
       if (!res.ok) {
         setError(data.error || "Invalid OTP");
-      } else {
-        setMessage("Email verified successfully");
-        await new Promise((res) => setTimeout(res,2000))
-        router.replace('/login')
+        return;
       }
+
+      login(data.accessToken, data.refreshToken);
+      router.push("/dashboard");
     } catch {
-      setError("Network error. Try again.");
+      setError("Network error.");
     } finally {
       setLoading(false);
     }
@@ -93,53 +105,45 @@ const Signup = () => {
       <div className="w-full max-w-md bg-white border border-neutral-200 rounded-xl p-8">
 
         <h2 className="text-2xl font-semibold text-neutral-900 mb-2">
-          {step === "signup" ? "Create account" : "Verify email"}
+          Login
         </h2>
 
         <p className="text-sm text-neutral-500 mb-6">
-          {step === "signup"
-            ? "Enter your details below."
-            : `Enter the 5-digit code sent to ${email}`}
+          Enter your credentials to continue.
         </p>
 
-        {step === "signup" && (
-          <div className="space-y-4">
-            <input
-              type="text"
-              placeholder="Full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-md border border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition"
-            />
+        <div className="space-y-4">
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            disabled={showOtp}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full px-4 py-2.5 rounded-md border border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition"
+          />
 
-            <input
-              type="email"
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-md border border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition"
-            />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            disabled={showOtp}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full px-4 py-2.5 rounded-md border border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition"
+          />
 
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-md border border-neutral-300 bg-white text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 transition"
-            />
-
+          {!showOtp && (
             <button
-              onClick={handleSubmitData}
+              onClick={handleLogin}
               disabled={loading}
               className="w-full py-2.5 rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-black transition disabled:opacity-60"
             >
-              {loading ? "Creating..." : "Create account"}
+              {loading ? "Signing in..." : "Login"}
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
-        {step === "otp" && (
-          <div className="space-y-6">
+        {showOtp && (
+          <div className="mt-6 space-y-4">
             <OtpInput length={5} value={otp} onChange={setOtp} />
 
             <button
@@ -147,7 +151,7 @@ const Signup = () => {
               disabled={loading}
               className="w-full py-2.5 rounded-md bg-neutral-900 text-white text-sm font-medium hover:bg-black transition disabled:opacity-60"
             >
-              {loading ? "Verifying..." : "Verify email"}
+              {loading ? "Verifying..." : "Verify & Login"}
             </button>
           </div>
         )}
@@ -166,6 +170,4 @@ const Signup = () => {
       </div>
     </div>
   );
-};
-
-export default Signup;
+}

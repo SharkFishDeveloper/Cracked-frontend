@@ -39,27 +39,42 @@ export async function POST(req: NextRequest) {
 
     // Check if email verified
     if (!user.emailVerified) {
-      const token = generateToken();
+    const now = new Date();
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          verificationToken:token,
-          verificationTokenExpiry: new Date(Date.now() + 15 * 60 * 1000),
-        },
-      });
-
-      await sendTokenEmail({
-        email: user.email ?? undefined,
-        name: user.name ?? undefined,
-        token: token,
-      });
-
+    // If token exists and is still valid → don't resend
+    if (
+      user.verificationToken &&
+      user.verificationTokenExpiry &&
+      user.verificationTokenExpiry > now
+    ) {
       return NextResponse.json(
-        { error: "Email not verified. Verification email sent." },
+        { error: "Email not verified. Check your inbox." },
         { status: 403 }
       );
     }
+
+    // Otherwise generate new token
+    const token = generateToken();
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verificationToken: token,
+        verificationTokenExpiry: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+
+    await sendTokenEmail({
+      email: user.email ?? undefined,
+      name: user.name ?? undefined,
+      token,
+    });
+
+    return NextResponse.json(
+      { error: "Verification email sent." },
+      { status: 403 }
+    );
+  }
 
     // Normal login flow continues if verified
 
@@ -87,7 +102,7 @@ export async function POST(req: NextRequest) {
     const accessToken = jwt.sign(
       { userId: user.id, deviceType },
       process.env.JWT_SECRET!,
-      { expiresIn: "2m" }
+      { expiresIn: "30m" }
     );
 
     return NextResponse.json({
