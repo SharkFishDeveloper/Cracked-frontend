@@ -3,11 +3,11 @@ import prisma from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, otp } = await req.json();
+    const { email, token } = await req.json();
 
-    if (!email || !otp) {
+    if (!email || !token) {
       return NextResponse.json(
-        { error: "Email and OTP required" },
+        { error: "Email and token required" },
         { status: 400 }
       );
     }
@@ -30,16 +30,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (user.verificationToken !== otp) {
+    if (user.verificationToken !== token) {
       return NextResponse.json(
-        { error: "Invalid OTP" },
+        { error: "Invalid token" },
         { status: 400 }
       );
     }
 
     if (user.verificationTokenExpiry < new Date()) {
       return NextResponse.json(
-        { error: "OTP expired" },
+        { error: "token expired" },
         { status: 400 }
       );
     }
