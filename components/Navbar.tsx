@@ -18,6 +18,16 @@ export default function Navbar() {
         Cracked
       </span>
 
+
+     <span
+        onClick={() => router.push("/product")}
+        className="font-semibold text-neutral-900 cursor-pointer"
+      >
+        Products
+      </span>
+
+
+
       {isAuthenticated ? (
         <LogoutButton />
       ) : (
