@@ -19,10 +19,11 @@ model User {
   verificationToken       String?
   verificationTokenExpiry DateTime?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   refreshTokens RefreshToken[]
+  subscription  Subscription?
 }
 
 model RefreshToken {
@@ -32,10 +33,27 @@ model RefreshToken {
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  deviceType String   
-
+  deviceType String
   expiresAt  DateTime
-  createdAt  DateTime @default(now())
+
+  createdAt DateTime @default(now())
 
   @@unique([userId, deviceType])
+}
+
+model Subscription {
+  userId        String   @id
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  planName      String
+  remainingMinutes Int
+
+  price         Int
+  currency      String
+
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+
+  expiresAt     DateTime
+  createdAt     DateTime @default(now())
 }
