@@ -1,7 +1,5 @@
-
 generator client {
   provider = "prisma-client-js"
-  
   output   = "../app/generated/prisma"
 }
 
@@ -16,29 +14,10 @@ model User {
   name          String?
   emailVerified Boolean  @default(false)
 
-  verificationToken       String?
-  verificationTokenExpiry DateTime?
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens RefreshToken[]
   subscription  Subscription?
-}
-
-model RefreshToken {
-  id         String   @id @default(uuid())
-  token      String   @unique
-
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  deviceType String
-  expiresAt  DateTime
-
-  createdAt DateTime @default(now())
-
-  @@unique([userId, deviceType])
 }
 
 model Subscription {

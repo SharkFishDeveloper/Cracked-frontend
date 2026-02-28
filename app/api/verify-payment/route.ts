@@ -2,19 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import prisma from "@/lib/prisma";
 import jwt from "jsonwebtoken";
+import { redis } from "@/lib/redis";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-
     const {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
       plan,
-    } = body;
+    } = await req.json();
 
-    // 1️⃣ Validate request
     if (
       !razorpay_order_id ||
       !razorpay_payment_id ||
@@ -27,8 +25,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2️⃣ Verify JWT
+    // ==============================
+    // 🔐 Auth Check (JWT + Redis)
+    // ==============================
     const authHeader = req.headers.get("authorization");
+
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json(
         { success: false, error: "Unauthorized" },
@@ -38,19 +39,35 @@ export async function POST(req: NextRequest) {
 
     const token = authHeader.split(" ")[1];
 
-    let decoded: any;
+    let decoded: { userId: string; deviceType: string };
+
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET!);
+      decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET!
+      ) as { userId: string; deviceType: string };
     } catch {
       return NextResponse.json(
-        { success: false, error: "Invalid token" },
+        { success: false, error: "Invalid or expired token" },
+        { status: 401 }
+      );
+    }
+
+    const sessionKey = `session:${decoded.userId}:${decoded.deviceType}`;
+    const storedToken = await redis.get(sessionKey);
+
+    if (!storedToken || storedToken !== token) {
+      return NextResponse.json(
+        { success: false, error: "Session expired or logged out" },
         { status: 401 }
       );
     }
 
     const userId = decoded.userId;
 
-    // 3️⃣ Verify Razorpay signature
+    // ==============================
+    // 🔐 Verify Razorpay Signature
+    // ==============================
     const generatedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
@@ -63,42 +80,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4️⃣ Map plan
-    let planID: "MONTH_60" | "MONTH_240" | null = null;
+    // ==============================
+    // 📦 Server-Controlled Plans
+    // ==============================
+    const plans = {
+      MONTH_60: { seconds: 3600, price: 600, validityDays: 15 },
+      MONTH_240: { seconds: 14400, price: 2200, validityDays: 30 },
+    } as const;
 
-    if (plan === "6015") planID = "MONTH_60";
-    else if (plan === "24030") planID = "MONTH_240";
-
-    if (!planID) {
+    if (!plans[plan as keyof typeof plans]) {
       return NextResponse.json(
         { success: false, error: "Invalid plan" },
         { status: 400 }
       );
     }
 
-    const plans = {
-        MONTH_60: { seconds: 3600, price: 600, validityDays: 15 },
-        MONTH_240: { seconds: 14400, price: 2200, validityDays: 30 },
-    };
+    const selected = plans[plan as keyof typeof plans];
 
-    const selected = plans[planID];
     const expiry = new Date(
-        Date.now() + selected.validityDays * 24 * 60 * 60 * 1000
+      Date.now() + selected.validityDays * 24 * 60 * 60 * 1000
     );
 
-    // 5️⃣ Transaction (idempotent + minimal ops)
+    // ==============================
+    // 💳 Transaction (Idempotent)
+    // ==============================
     await prisma.$transaction(async (tx) => {
-
       const existing = await tx.subscription.findUnique({
         where: { userId },
-        select: {
-          razorpayPaymentId: true,
-          remainingSeconds: true,
-          expiresAt: true,
-        },
       });
 
-      // 🔒 Idempotency: already processed this payment
+      // Idempotency protection
       if (existing?.razorpayPaymentId === razorpay_payment_id) {
         return;
       }
@@ -111,16 +122,17 @@ export async function POST(req: NextRequest) {
       await tx.subscription.upsert({
         where: { userId },
         update: {
-          planName: planID,
+          planName: plan,
           remainingSeconds: selected.seconds + carryForward,
           price: selected.price,
+          currency: "INR",
           razorpayOrderId: razorpay_order_id,
           razorpayPaymentId: razorpay_payment_id,
           expiresAt: expiry,
         },
         create: {
           userId,
-          planName: planID,
+          planName: plan,
           remainingSeconds: selected.seconds,
           price: selected.price,
           currency: "INR",

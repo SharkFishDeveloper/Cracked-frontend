@@ -10,18 +10,30 @@ export default function LogoutButton() {
   const [loading, setLoading] = useState(false);
 
   const handleLogout = async () => {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    const refreshToken = localStorage.getItem("refreshToken");
+      const accessToken = localStorage.getItem("accessToken");
 
-    await fetch("/api/logout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    });
+      if (accessToken) {
+        await fetch("/api/logout", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+      }
 
-    logout(); // global state update
-    router.push("/login");
+      // Always clear client state
+      logout();
+      router.push("/login");
+    } catch (err) {
+      console.error("Logout error:", err);
+      logout();
+      router.push("/login");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

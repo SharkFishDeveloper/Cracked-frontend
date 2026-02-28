@@ -1,14 +1,30 @@
+"use server"
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { redis } from "@/lib/redis";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
 import { sendTokenEmail } from "@/lib/email/sendTokenEmail";
 import generateToken from "@/lib/generateToken";
+import { TIME } from "@/lib/timeDB";
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, password, deviceType } = await req.json();
+    const body = await req.json();
+    const { email, password, deviceType } = body;
+
+
+    const normalizedEmail = email?.toLowerCase().trim();
+
+    // ===============================
+    // Basic validation
+    // ===============================
+    if (!normalizedEmail || !password || !deviceType) {
+      return NextResponse.json(
+        { error: "Email, password and deviceType required" },
+        { status: 400 }
+      );
+    }
 
     if (!["WEB", "ELECTRON"].includes(deviceType)) {
       return NextResponse.json(
@@ -17,12 +33,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // ===============================
+    // Find user
+    // ===============================
     const user = await prisma.user.findUnique({
-      where: { email },
-          include: {
-        subscription: true,
-      },
-
+      where: { email: normalizedEmail },
+      include: { subscription: true },
     });
 
     if (!user) {
@@ -32,7 +48,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
+
     const valid = await bcrypt.compare(password, user.password);
+
 
     if (!valid) {
       return NextResponse.json(
@@ -41,90 +59,92 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if email verified
+    // ===============================
+    // Email not verified
+    // ===============================
     if (!user.emailVerified) {
-    const now = new Date();
 
-    // If token exists and is still valid → don't resend
-    if (
-      user.verificationToken &&
-      user.verificationTokenExpiry &&
-      user.verificationTokenExpiry > now
-    ) {
+      const existingVerification = await redis.get(
+        `verify:${normalizedEmail}`
+      );
+
+
+      if (!existingVerification) {
+        const token = generateToken();
+        const hashedToken = await bcrypt.hash(token, 10);
+
+        await redis.set(
+          `verify:${normalizedEmail}`,
+          {
+            email: user.email,
+            name: user.name,
+            token: hashedToken,
+          },
+          { ex: TIME.FIFTEEN_MINUTES.seconds }
+        );
+
+
+        await sendTokenEmail({
+          email: user.email ?? undefined,
+          name: user.name ?? undefined,
+          token,
+        });
+      }
+
       return NextResponse.json(
-        { error: "Email not verified. Check your inbox." },
+        { error: "Email not verified. Verification email sent." },
         { status: 403 }
       );
     }
 
-    // Otherwise generate new token
-    const token = generateToken();
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        verificationToken: token,
-        verificationTokenExpiry: new Date(Date.now() + 15 * 60 * 1000),
-      },
-    });
+    // ===============================
+    // SESSION CONTROL
+    // ===============================
+    const sessionKey = `session:${user.id}:${deviceType}`;
+    const existingSession = await redis.get(sessionKey);
 
-    await sendTokenEmail({
-      email: user.email ?? undefined,
-      name: user.name ?? undefined,
-      token,
-    });
 
-    return NextResponse.json(
-      { error: "Verification email sent." },
-      { status: 403 }
-    );
-  }
+    if (existingSession) {
+      return NextResponse.json(
+        { error: `Already logged in on this account` },
+        { status: 401 }
+      );
+    }
 
-    // Normal login flow continues if verified
-
-    const refreshToken = crypto.randomUUID();
-
-    await prisma.refreshToken.upsert({
-      where: {
-        userId_deviceType: {
-          userId: user.id,
-          deviceType: deviceType,
-        },
-      },
-      update: {
-        token: refreshToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-      create: {
-        token: refreshToken,
-        userId: user.id,
-        deviceType: deviceType,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-
+    // ===============================
+    // Generate JWT
+    // ===============================
     const accessToken = jwt.sign(
       { userId: user.id, deviceType },
       process.env.JWT_SECRET!,
-      { expiresIn: "1440m" }
+      { expiresIn: TIME.ONE_HOUR.label }
     );
+
+
+    // ===============================
+    // Store session
+    // ===============================
+    await redis.set(sessionKey, accessToken, {
+      ex: TIME.ONE_HOUR.seconds,
+    });
+
 
     return NextResponse.json({
       accessToken,
-      refreshToken,
       user: {
         id: user.id,
         name: user.name,
         email: user.email,
         remainingSeconds: user.subscription?.remainingSeconds ?? 0,
         planName: user.subscription?.planName ?? null,
-        subscriptionExpiresAt: user.subscription?.expiresAt ?? null,
-        expiresAt:user.subscription?.expiresAt ?? null
-      }
+        subscriptionExpiresAt:
+          user.subscription?.expiresAt ?? null,
+      },
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("🔥 LOGIN ERROR:", err);
     return NextResponse.json(
       { error: "Server error" },
       { status: 500 }

@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { redis } from "@/lib/redis";
 import jwt from "jsonwebtoken";
-import crypto from "crypto";
+import bcrypt from "bcrypt";
+import { TIME } from "@/lib/timeDB";
 
 export async function POST(req: NextRequest) {
   try {
     const { email, token, deviceType } = await req.json();
 
+    // ===============================
+    // Basic validation
+    // ===============================
     if (!email || !token || !deviceType) {
       return NextResponse.json(
         { error: "Email, token and deviceType required" },
@@ -21,72 +26,85 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-    });
+    // ===============================
+    // Get verification data
+    // ===============================
+    const pendingUser = await redis.get<any>(`verify:${email}`);
 
-    if (!user) {
+    if (!pendingUser) {
       return NextResponse.json(
-        { error: "User not found" },
-        { status: 404 }
-      );
-    }
-
-    if (
-      !user.verificationToken ||
-      !user.verificationTokenExpiry ||
-      user.verificationToken !== token ||
-      user.verificationTokenExpiry < new Date()
-    ) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
+        { error: "Token expired or invalid" },
         { status: 400 }
       );
     }
 
-    // ✅ Mark verified
-    await prisma.user.update({
-      where: { email },
-      data: {
-        emailVerified: true,
-        verificationToken: null,
-        verificationTokenExpiry: null,
-      },
-    });
+    const isValid = await bcrypt.compare(token, pendingUser.token);
+    if (!isValid) {
+      return NextResponse.json(
+        { error: "Invalid token" },
+        { status: 400 }
+      );
+    }
 
-    // ✅ Create refresh token
-    const refreshToken = crypto.randomUUID();
+    // Remove verification entry
+    await redis.del(`verify:${email}`);
 
-    await prisma.refreshToken.upsert({
-      where: {
-        userId_deviceType: {
-          userId: user.id,
-          deviceType,
+    // ===============================
+    // Upsert user
+    // ===============================
+    let user;
+    try {
+      user = await prisma.user.upsert({
+        where: { email: pendingUser.email },
+        update: {
+          emailVerified: true,
         },
-      },
-      update: {
-        token: refreshToken,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-      create: {
-        token: refreshToken,
-        userId: user.id,
-        deviceType,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
+        create: {
+          email: pendingUser.email,
+          name: pendingUser.name,
+          password: pendingUser.password,
+          emailVerified: true,
+        },
+      });
+    } catch (error) {
+      return NextResponse.json(
+        { error: "Try again after some time" },
+        { status: 500 }
+      );
+    }
 
-    // ✅ Create access token
+    // ===============================
+    // SESSION CONTROL (1 per device)
+    // ===============================
+    const sessionKey = `session:${user.id}:${deviceType}`;
+
+    const existingSession = await redis.get(sessionKey);
+    if (existingSession) {
+      return NextResponse.json(
+        { error: `Already logged in on ${deviceType}` },
+        { status: 403 }
+      );
+    }
+
+    // ===============================
+    // Generate JWT
+    // ===============================
     const accessToken = jwt.sign(
       { userId: user.id, deviceType },
       process.env.JWT_SECRET!,
-      { expiresIn: "30m" }
+      { expiresIn: TIME.ONE_HOUR.label }
     );
+
+    // ===============================
+    // Store session in Redis
+    // ===============================
+    await redis.set(sessionKey, accessToken, {
+      ex: TIME.ONE_HOUR.seconds, // must match JWT expiry
+    });
 
     return NextResponse.json({
       message: "Email verified successfully",
       accessToken,
-      refreshToken,
     });
 
   } catch (err) {

@@ -7,7 +7,7 @@ const plans = [
       features: ["Real-time Screen Overlay", "Live Code Analysis", "Transcription Logs","15 days"],
       buttonText: "Purchase 60 Mins",
       highlight: false,
-      planId: "6015"
+      planId: "MONTH_60"
     },
     {
       name: "Deep Dive Bundle",
@@ -20,7 +20,7 @@ const plans = [
         "Save ₹200"],
       buttonText: "Purchase 4 Hours",
       highlight: true,
-      planId: "24030"
+      planId: "MONTH_240"
     }
   ];
 

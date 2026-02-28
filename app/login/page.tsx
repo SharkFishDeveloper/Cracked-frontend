@@ -42,20 +42,21 @@ export default function Login() {
       //TODO: Change this now, as i am sending more info from backend
       const data = await res.json();
 
-      // 🔥 If email not verified
+      console.log(data)
       if (res.status === 403) {
         setShowOtp(true);
         setMessage("Verification code sent to your email.");
         return;
       }
 
+      // Other errors
       if (!res.ok) {
         setError(data.error || "Invalid credentials");
         return;
       }
 
       // Normal login
-      login(data.accessToken, data.refreshToken);
+      login(data.accessToken);
       router.push("/dashboard");
     } catch {
       setError("Network error. Try again.");
@@ -91,7 +92,7 @@ export default function Login() {
         return;
       }
 
-      login(data.accessToken, data.refreshToken);
+      login(data.accessToken);
       router.push("/dashboard");
     } catch {
       setError("Network error.");
