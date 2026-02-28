@@ -19,6 +19,10 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
       where: { email },
+          include: {
+        subscription: true,
+      },
+
     });
 
     if (!user) {
@@ -102,12 +106,21 @@ export async function POST(req: NextRequest) {
     const accessToken = jwt.sign(
       { userId: user.id, deviceType },
       process.env.JWT_SECRET!,
-      { expiresIn: "30m" }
+      { expiresIn: "1440m" }
     );
 
     return NextResponse.json({
       accessToken,
       refreshToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        remainingSeconds: user.subscription?.remainingSeconds ?? 0,
+        planName: user.subscription?.planName ?? null,
+        subscriptionExpiresAt: user.subscription?.expiresAt ?? null,
+        expiresAt:user.subscription?.expiresAt ?? null
+      }
     });
 
   } catch (err) {

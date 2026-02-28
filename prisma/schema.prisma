@@ -46,7 +46,7 @@ model Subscription {
   user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   planName      String
-  remainingMinutes Int
+  remainingSeconds Int
 
   price         Int
   currency      String

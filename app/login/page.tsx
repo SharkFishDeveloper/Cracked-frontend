@@ -39,7 +39,7 @@ export default function Login() {
           deviceType: "WEB",
         }),
       });
-
+      //TODO: Change this now, as i am sending more info from backend
       const data = await res.json();
 
       // 🔥 If email not verified

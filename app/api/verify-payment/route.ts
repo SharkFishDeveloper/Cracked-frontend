@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
     }
 
     const plans = {
-        MONTH_60: { minutes: 60, price: 600, validityDays: 15 },
-        MONTH_240: { minutes: 240, price: 2200, validityDays: 30 },
+        MONTH_60: { seconds: 3600, price: 600, validityDays: 15 },
+        MONTH_240: { seconds: 14400, price: 2200, validityDays: 30 },
     };
 
     const selected = plans[planID];
@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
         where: { userId },
         select: {
           razorpayPaymentId: true,
-          remainingMinutes: true,
+          remainingSeconds: true,
           expiresAt: true,
         },
       });
@@ -105,14 +105,14 @@ export async function POST(req: NextRequest) {
 
       const carryForward =
         existing && existing.expiresAt > new Date()
-          ? existing.remainingMinutes
+          ? existing.remainingSeconds
           : 0;
 
       await tx.subscription.upsert({
         where: { userId },
         update: {
           planName: planID,
-          remainingMinutes: selected.minutes + carryForward,
+          remainingSeconds: selected.seconds + carryForward,
           price: selected.price,
           razorpayOrderId: razorpay_order_id,
           razorpayPaymentId: razorpay_payment_id,
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         create: {
           userId,
           planName: planID,
-          remainingMinutes: selected.minutes,
+          remainingSeconds: selected.seconds,
           price: selected.price,
           currency: "INR",
           razorpayOrderId: razorpay_order_id,

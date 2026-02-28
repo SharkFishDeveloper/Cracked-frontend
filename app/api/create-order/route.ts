@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
 
     // Server-controlled pricing
     const plans = {
-      MONTH_60: { amount: 600, minutes: 60 },
-      MONTH_240: { amount: 2200, minutes: 240 },
+      MONTH_60: { amount: 600, seconds: 3600 },
+      MONTH_240: { amount: 2200, seconds: 14400 },
     };
 
     const selected = plans[planID];
@@ -49,14 +49,14 @@ export async function POST(req: NextRequest) {
       where: { userId },
       select: {
         expiresAt: true,
-        remainingMinutes: true,
+        remainingSeconds: true,
       },
     });
 
     if (
       existing &&
       existing.expiresAt > new Date() &&
-      existing.remainingMinutes >= 7
+      existing.remainingSeconds >= 420
     ) {
       return NextResponse.json(
         { error: "Plan still active" },
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     if (
       existing &&
       existing.expiresAt > new Date() &&
-      existing.remainingMinutes >= 7
+      existing.remainingSeconds >= 420
     ) {
       return NextResponse.json(
         { error: "Plan still active" },
